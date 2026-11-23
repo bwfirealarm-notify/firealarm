@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BW Fire Alarm — สถานะระบบ</title>
+<script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<style>
+  :root{--bg:#eef2f1;--card:#fff;--ink:#17302c;--muted:#5d6f6c;--ok:#1b7f55;--bad:#c0392b;--warn:#b7791f;--brand:#17463f}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,"Noto Sans Thai",sans-serif;background:var(--bg);color:var(--ink)}
+  header{background:var(--brand);color:#fff;padding:18px 20px}
+  header h1{margin:0;font-size:20px}
+  header p{margin:4px 0 0;opacity:.8;font-size:14px}
+  main{max-width:760px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px #0001}
+  .card h2{margin:0 0 12px;font-size:16px}
+  .big{font-size:22px;font-weight:700;text-align:center;padding:22px 10px;border-radius:12px}
+  .big.ok{background:#e3f4ec;color:var(--ok)}
+  .big.bad{background:#fdecea;color:var(--bad);animation:pulse 1s infinite}
+  .big.unk{background:#f1f3f3;color:var(--muted)}
+  @keyframes pulse{50%{background:#f8c9c4}}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:600px){.grid{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  td{padding:6px 0;border-bottom:1px solid #eef0f0}
+  td:first-child{color:var(--muted);width:48%}
+  .pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:600}
+  .pill.ok{background:#e3f4ec;color:var(--ok)}.pill.bad{background:#fdecea;color:var(--bad)}.pill.unk{background:#f1f3f3;color:var(--muted)}
+  label{display:block;font-size:14px;margin:8px 0 4px}
+  input{width:100%;padding:10px;border:1px solid #c8d0cf;border-radius:8px;font-size:15px}
+  button{padding:10px 16px;border:0;border-radius:8px;background:var(--brand);color:#fff;font-size:15px;cursor:pointer}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
+  .muted{color:var(--muted);font-size:13px}
+  #log{list-style:none;margin:0;padding:0;max-height:260px;overflow:auto;font-size:14px}
+  #log li{padding:6px 0;border-bottom:1px solid #eef0f0}
+  #log time{color:var(--muted);margin-right:8px}
+  .hidden{display:none}
+  .note{background:#fff7e6;border-radius:10px;padding:10px 12px;font-size:13px;color:#7a5a12}
+</style>
+</head>
+<body>
+<header>
+  <h1>🔔 BW Fire Alarm — ระบบแจ้งเตือนเสริม</h1>
+  <p>ชุดส่งชั้นใต้ดิน → EMQX Cloud → ชุดรับเคาน์เตอร์ชั้น 2</p>
+</header>
+
+<main>
+  <!-- เข้าสู่ระบบ -->
+  <section class="card" id="loginCard">
+    <h2>เชื่อมต่อเพื่อดูสถานะ</h2>
+    <label for="pw">รหัสผ่านของผู้ใช้ <b>dashboard</b></label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <div class="row">
+      <label style="display:flex;gap:6px;align-items:center;margin:0"><input id="remember" type="checkbox" style="width:auto"> จำรหัสในเครื่องนี้</label>
+      <button id="connectBtn">เชื่อมต่อ</button>
+    </div>
+    <p class="muted" id="connMsg"></p>
+  </section>
+
+  <!-- สถานะ -->
+  <section id="statusArea" class="hidden">
+    <div class="card">
+      <h2>สถานะตู้ Fire Alarm</h2>
+      <div id="alarmBox" class="big unk">รอข้อมูล…</div>
+      <p class="muted" style="text-align:center;margin:10px 0 0">เมื่อได้ยินเสียงเตือน ให้ยืนยันสถานะที่หน้าตู้ NOTIFIER ทุกครั้ง</p>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>ตัวส่ง (ชั้นใต้ดิน) <span id="sOnline" class="pill unk">?</span></h2>
+        <table>
+          <tr><td>สัญญาณ Wi-Fi</td><td id="sRssi">-</td></tr>
+          <tr><td>ระดับเสียงล่าสุด</td><td id="sLevel">-</td></tr>
+          <tr><td>เปิดเครื่องมาแล้ว</td><td id="sUp">-</td></tr>
+          <tr><td>อัปเดตล่าสุด</td><td id="sSeen">-</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <h2>ตัวรับ (เคาน์เตอร์) <span id="rOnline" class="pill unk">?</span></h2>
+        <table>
+          <tr><td>สัญญาณ Wi-Fi</td><td id="rRssi">-</td></tr>
+          <tr><td>เห็นตัวส่ง</td><td id="rLink">-</td></tr>
+          <tr><td>เปิดเครื่องมาแล้ว</td><td id="rUp">-</td></tr>
+          <tr><td>อัปเดตล่าสุด</td><td id="rSeen">-</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>เหตุการณ์ (ตั้งแต่เปิดหน้านี้)</h2>
+      <ul id="log"><li class="muted">ยังไม่มีเหตุการณ์</li></ul>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <button id="logoutBtn" style="background:#7b8a88">ออกจากระบบ</button>
+    </div>
+  </section>
+
+  <p class="muted" style="text-align:center">ระบบแจ้งเตือนเสริม · หน้านี้แสดงสถานะแบบเรียลไทม์จาก EMQX Cloud</p>
+</main>
+
+<script>
+const BROKER_URL = "wss://bd343e82.ala.asia-southeast1.emqxsl.com:8084/mqtt";
+const USERNAME   = "dashboard";
+const PREFIX     = "bwfa";
+
+const $ = id => document.getElementById(id);
+let client = null;
+const state = { sOnline:null, rOnline:null, alarm:null, sSeen:0, rSeen:0 };
+
+function fmtUp(s){ if(s==null) return "-"; const d=Math.floor(s/86400), h=Math.floor(s/3600)%24, m=Math.floor(s/60)%60; return `${d} วัน ${h} ชม. ${m} นาที`; }
+function fmtRssi(r){ if(r==null) return "-"; const q = r>-60?"ดีมาก":r>-70?"ดี":r>-80?"พอใช้":"อ่อน"; return `${r} dBm (${q})`; }
+function ago(t){ if(!t) return "-"; const s=Math.round((Date.now()-t)/1000); return s<60?`${s} วินาทีที่แล้ว`:`${Math.round(s/60)} นาทีที่แล้ว`; }
+function pill(el, v, okText, badText){ el.className = "pill " + (v===null?"unk":v?"ok":"bad"); el.textContent = v===null?"?":v?okText:badText; }
+
+function log(text){
+  const ul=$("log");
+  if(ul.firstElementChild && ul.firstElementChild.classList.contains("muted")) ul.innerHTML="";
+  const li=document.createElement("li");
+  const t=document.createElement("time"); t.textContent=new Date().toLocaleTimeString("th-TH");
+  li.append(t, document.createTextNode(text));
+  ul.prepend(li);
+  while(ul.children.length>50) ul.lastChild.remove();
+}
+
+function render(){
+  const box=$("alarmBox");
+  if(state.sOnline===false){ box.className="big unk"; box.textContent="⚠️ ตัวส่งออฟไลน์ — ไม่ทราบสถานะตู้"; }
+  else if(state.alarm===true){ box.className="big bad"; box.textContent="🔔 ตู้ Fire Alarm กำลังดัง"; }
+  else if(state.alarm===false){ box.className="big ok"; box.textContent="✅ ปกติ"; }
+  else { box.className="big unk"; box.textContent="รอข้อมูล…"; }
+  pill($("sOnline"), state.sOnline, "ออนไลน์", "ออฟไลน์");
+  pill($("rOnline"), state.rOnline, "ออนไลน์", "ออฟไลน์");
+  $("sSeen").textContent = ago(state.sSeen);
+  $("rSeen").textContent = ago(state.rSeen);
+}
+setInterval(render, 5000);
+
+function onMessage(topic, payload){
+  const msg = payload.toString();
+  const sub = topic.slice(PREFIX.length+1);
+  let j=null; try{ j=JSON.parse(msg); }catch(e){}
+
+  switch(sub){
+    case "sender/online":   state.sOnline = msg==="1"; if(state.sOnline) state.sSeen=Date.now(); break;
+    case "receiver/online": state.rOnline = msg==="1"; if(state.rOnline) state.rSeen=Date.now(); break;
+    case "sender/alarm":    state.alarm = msg==="1"; break;
+    case "sender/info":
+      if(j){ state.sSeen=Date.now(); $("sRssi").textContent=fmtRssi(j.rssi); $("sLevel").textContent=j.level+" ครั้ง/วินาที"; $("sUp").textContent=fmtUp(j.up); }
+      break;
+    case "receiver/info":
+      if(j){ state.rSeen=Date.now(); $("rRssi").textContent=fmtRssi(j.rssi); $("rLink").textContent=j.link?"เห็น":"ไม่เห็น"; $("rUp").textContent=fmtUp(j.up); }
+      break;
+    case "sender/event":
+      if(j?.type==="alarm_on") log("🔔 ตรวจพบเสียงตู้ Fire Alarm");
+      else if(j?.type==="alarm_off") log("✅ เสียงตู้หยุดแล้ว");
+      else if(j?.type==="test") log("🧪 กดปุ่มทดสอบที่ตัวส่ง");
+      break;
+    case "receiver/event":
+      if(j?.type==="silenced") log("🔕 พนักงานกดปิดเสียงที่เคาน์เตอร์");
+      break;
+  }
+  render();
+}
+
+function connect(pw){
+  $("connMsg").textContent="กำลังเชื่อมต่อ…";
+  client = mqtt.connect(BROKER_URL, {
+    username: USERNAME, password: pw,
+    clientId: "dashboard-" + Math.random().toString(16).slice(2,10),
+    reconnectPeriod: 5000, connectTimeout: 10000, clean: true
+  });
+  client.on("connect", () => {
+    $("connMsg").textContent="";
+    $("loginCard").classList.add("hidden");
+    $("statusArea").classList.remove("hidden");
+    client.subscribe(PREFIX + "/#");
+    log("เชื่อมต่อระบบแล้ว");
+  });
+  client.on("message", onMessage);
+  client.on("error", err => {
+    $("connMsg").textContent = "เชื่อมต่อไม่ได้: " + (err.message || err);
+    if(String(err.message||"").match(/auth|Not authorized|Bad user/i)){ client.end(true); localStorage.removeItem("bwfa_pw"); }
+  });
+  client.on("offline", () => log("⚠️ หน้าเว็บขาดการเชื่อมต่อ กำลังลองใหม่…"));
+}
+
+$("connectBtn").onclick = () => {
+  const pw=$("pw").value; if(!pw) return;
+  if($("remember").checked) localStorage.setItem("bwfa_pw", pw);
+  connect(pw);
+};
+$("pw").addEventListener("keydown", e => { if(e.key==="Enter") $("connectBtn").click(); });
+$("logoutBtn").onclick = () => { localStorage.removeItem("bwfa_pw"); if(client) client.end(true); location.reload(); };
+
+try { const saved = localStorage.getItem("bwfa_pw"); if(saved) connect(saved); } catch(e){}
+</script>
+</body>
+</html>
