@@ -36,6 +36,12 @@
   #log li{padding:6px 0;border-bottom:1px solid #eef0f0}
   #log time{color:var(--muted);margin-right:8px}
   .hidden{display:none}
+  .live{display:flex;align-items:flex-end;gap:2px;height:120px;position:relative;background:#f6f8f8;border-radius:8px;padding:6px;margin-top:8px}
+  .live div.b{flex:1;background:#9db8b3;border-radius:2px 2px 0 0;min-height:1px}
+  .live div.b.loud{background:var(--bad)}
+  .live .thr{position:absolute;left:6px;right:6px;border-top:1px dashed var(--warn)}
+  .live .thrl{position:absolute;right:8px;font-size:11px;color:var(--warn)}
+  .bignum{font-size:28px;font-weight:700}
   .note{background:#fff7e6;border-radius:10px;padding:10px 12px;font-size:13px;color:#7a5a12}
 </style>
 </head>
@@ -70,6 +76,7 @@
       <div class="card">
         <h2>ตัวส่ง (ชั้นใต้ดิน) <span id="sOnline" class="pill unk">?</span></h2>
         <table>
+          <tr><td>Wi-Fi</td><td id="sSsid">-</td></tr>
           <tr><td>สัญญาณ Wi-Fi</td><td id="sRssi">-</td></tr>
           <tr><td>ระดับเสียงล่าสุด</td><td id="sLevel">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="sUp">-</td></tr>
@@ -82,6 +89,7 @@
       <div class="card">
         <h2>ตัวรับ (เคาน์เตอร์) <span id="rOnline" class="pill unk">?</span></h2>
         <table>
+          <tr><td>Wi-Fi</td><td id="rSsid">-</td></tr>
           <tr><td>สัญญาณ Wi-Fi</td><td id="rRssi">-</td></tr>
           <tr><td>เห็นตัวส่ง</td><td id="rLink">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="rUp">-</td></tr>
@@ -91,6 +99,16 @@
           <tr><td>อัปเดตล่าสุด</td><td id="rSeen">-</td></tr>
         </table>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>ระดับเสียงสดที่ตัวส่ง (60 วินาทีล่าสุด)</h2>
+      <div class="row" style="justify-content:space-between">
+        <div><span class="bignum" id="liveNow">-</span> <span class="muted">ครั้ง/วินาที</span></div>
+        <div class="muted" id="liveEp">-</div>
+      </div>
+      <div class="live" id="liveBars"><div class="thr" id="liveThr"></div><span class="thrl" id="liveThrL">เกณฑ์ 20</span></div>
+      <p class="muted" id="liveMsg">กำลังขอข้อมูลจากตัวส่ง…</p>
     </div>
 
     <div class="card">
@@ -124,7 +142,7 @@ const state = { sOnline:null, rOnline:null, alarm:null, sSeen:0, rSeen:0 };
 
 const RR = {poweron:"เสียบไฟ / เปิดเครื่อง", ext:"กดปุ่ม EN", sw:"รีสตาร์ตด้วยโปรแกรม", panic:"⚠️ โปรแกรมพัง (crash)", wdt:"⚠️ โปรแกรมค้าง (watchdog)", brownout:"⚠️ ไฟเลี้ยงตก", "mqtt-wd":"ต่อ EMQX ไม่ได้นาน 5 นาที", saved:"บันทึกค่าตั้งค่าใหม่", other:"อื่น ๆ"};
 function fmtRr(c){ return c==null ? "-" : (RR[c] || c); }
-function diag(j,p){ $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent=j.fw||"-"; }
+function diag(j,p){ $(p+"Ssid").textContent=j.ssid||"-"; $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent=j.fw||"-"; }
 function fmtUp(s){ if(s==null) return "-"; const d=Math.floor(s/86400), h=Math.floor(s/3600)%24, m=Math.floor(s/60)%60; return `${d} วัน ${h} ชม. ${m} นาที`; }
 function fmtRssi(r){ if(r==null) return "-"; const q = r>-60?"ดีมาก":r>-70?"ดี":r>-80?"พอใช้":"อ่อน"; return `${r} dBm (${q})`; }
 function ago(t){ if(!t) return "-"; const s=Math.round((Date.now()-t)/1000); return s<60?`${s} วินาทีที่แล้ว`:`${Math.round(s/60)} นาทีที่แล้ว`; }
@@ -147,6 +165,41 @@ function otaLog(who, j){
   else if(j.type==="ota_failed") log(`❌ ${who} อัปเดตเวอร์ชัน ${j.ver} ไม่สำเร็จ`);
 }
 
+// ---- ระดับเสียงสด ----
+const LIVE_N = 60, THRESH = 20, SUSTAIN = 10;
+const liveVals = [];
+let liveLast = 0, liveTimer = null;
+const scaleH = v => Math.log10(v + 1) / Math.log10(1001);   // 0..1000 แบบลอการิทึม
+function initLive(){
+  const box = $("liveBars");
+  for(let i=0;i<LIVE_N;i++){ const d=document.createElement("div"); d.className="b"; d.style.height="1px"; box.appendChild(d); }
+  const y = scaleH(THRESH)*100;
+  $("liveThr").style.bottom = (6 + y * 1.08) + "px";
+  $("liveThrL").style.bottom = (8 + y * 1.08) + "px";
+}
+function onLive(j){
+  liveLast = Date.now();
+  liveVals.push(j); if(liveVals.length>LIVE_N) liveVals.shift();
+  const bars = $("liveBars").querySelectorAll("div.b");
+  const off = LIVE_N - liveVals.length;
+  bars.forEach((b,i)=>{ const v = liveVals[i-off];
+    b.style.height = v ? Math.max(1, scaleH(v.lvl)*108)+"px" : "1px";
+    b.classList.toggle("loud", !!(v && v.loud)); });
+  $("liveNow").textContent = j.lvl;
+  $("liveEp").textContent = j.alarm ? "🔔 ระบบกำลังเตือน"
+    : j.ep ? `เสียงต่อเนื่อง ${j.ep} วินาที (เตือนเมื่อเกิน ${SUSTAIN})` : "เงียบ";
+  $("liveMsg").textContent = "อัปเดตทุก 1 วินาที · หยุดส่งเองเมื่อปิดหน้านี้";
+}
+function requestLive(){
+  if(!client || !client.connected || document.visibilityState!=="visible") return;
+  client.publish(PREFIX + "/cmd/live", "1", {qos:1}, err => {
+    if(err) $("liveMsg").textContent = "ขอดูเสียงสดไม่ได้: ผู้ใช้ dashboard ยังไม่มีสิทธิ์ส่ง bwfa/cmd/live (ดูวิธีตั้งใน README)";
+  });
+  setTimeout(() => { if(Date.now()-liveLast > 8000 && state.sOnline!==false)
+    $("liveMsg").textContent = "ยังไม่ได้รับข้อมูลเสียงสด: ตรวจว่าตัวส่งเป็นเฟิร์มแวร์ 1.7.0 ขึ้นไป และตั้งสิทธิ์ใน EMQX แล้ว"; }, 8000);
+}
+document.addEventListener("visibilitychange", requestLive);
+
 function render(){
   const box=$("alarmBox");
   if(state.sOnline===false){ box.className="big unk"; box.textContent="⚠️ ตัวส่งออฟไลน์ — ไม่ทราบสถานะตู้"; }
@@ -159,12 +212,14 @@ function render(){
   $("rSeen").textContent = ago(state.rSeen);
 }
 setInterval(render, 5000);
+initLive();
 
 function onMessage(topic, payload){
   const msg = payload.toString();
   const sub = topic.slice(PREFIX.length+1);
   let j=null; try{ j=JSON.parse(msg); }catch(e){}
 
+  if(sub==="live/sender"){ if(j) onLive(j); return; }
   switch(sub){
     case "sender/online":   state.sOnline = msg==="1"; if(state.sOnline) state.sSeen=Date.now(); break;
     case "receiver/online": state.rOnline = msg==="1"; if(state.rOnline) state.rSeen=Date.now(); break;
@@ -194,13 +249,14 @@ function connect(pw){
   client = mqtt.connect(BROKER_URL, {
     username: USERNAME, password: pw,
     clientId: "dashboard-" + Math.random().toString(16).slice(2,10),
-    reconnectPeriod: 5000, connectTimeout: 10000, clean: true
+    reconnectPeriod: 5000, connectTimeout: 10000, clean: true, protocolVersion: 5
   });
   client.on("connect", () => {
     $("connMsg").textContent="";
     $("loginCard").classList.add("hidden");
     $("statusArea").classList.remove("hidden");
-    client.subscribe(PREFIX + "/#");
+    client.subscribe(PREFIX + "/#", () => requestLive());
+    if(!liveTimer) liveTimer = setInterval(requestLive, 60000);
     log("เชื่อมต่อระบบแล้ว");
   });
   client.on("message", onMessage);
