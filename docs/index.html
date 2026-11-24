@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BW Fire Alarm — สถานะระบบ</title>
 <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 <style>
   :root{--bg:#eef2f1;--card:#fff;--ink:#17302c;--muted:#5d6f6c;--ok:#1b7f55;--bad:#c0392b;--warn:#b7791f;--brand:#17463f}
   *{box-sizing:border-box}
@@ -73,6 +74,9 @@
           <tr><td>สัญญาณ Wi-Fi</td><td id="sRssi">-</td></tr>
           <tr><td>ระดับเสียงล่าสุด</td><td id="sLevel">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="sUp">-</td></tr>
+          <tr><td>รีสตาร์ตล่าสุดเพราะ</td><td id="sRr">-</td></tr>
+          <tr><td>หลุดจาก EMQX</td><td id="sDrops">-</td></tr>
+          <tr><td>เฟิร์มแวร์</td><td id="sFw">-</td></tr>
           <tr><td>อัปเดตล่าสุด</td><td id="sSeen">-</td></tr>
         </table>
       </div>
@@ -82,6 +86,9 @@
           <tr><td>สัญญาณ Wi-Fi</td><td id="rRssi">-</td></tr>
           <tr><td>เห็นตัวส่ง</td><td id="rLink">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="rUp">-</td></tr>
+          <tr><td>รีสตาร์ตล่าสุดเพราะ</td><td id="rRr">-</td></tr>
+          <tr><td>หลุดจาก EMQX</td><td id="rDrops">-</td></tr>
+          <tr><td>เฟิร์มแวร์</td><td id="rFw">-</td></tr>
           <tr><td>อัปเดตล่าสุด</td><td id="rSeen">-</td></tr>
         </table>
       </div>
@@ -96,6 +103,19 @@
     </div>
   </section>
 
+  <!-- ติดตั้ง / อัปเดตเฟิร์มแวร์ -->
+  <section class="card">
+    <h2>ติดตั้ง / อัปเดตโปรแกรมลงบอร์ด</h2>
+    <p class="muted">ใช้ Chrome หรือ Edge บนคอมพิวเตอร์ เสียบบอร์ด ESP32 ด้วยสาย USB แล้วกดปุ่มด้านล่าง
+      โปรแกรมตัวเดียวใช้ได้ทั้งตัวส่งและตัวรับ</p>
+    <esp-web-install-button manifest="firmware/manifest.json">
+      <button slot="activate">⚡ ติดตั้ง / อัปเดตโปรแกรม</button>
+      <span slot="unsupported" class="note">เบราว์เซอร์นี้ไม่รองรับ กรุณาใช้ Chrome หรือ Edge บนคอมพิวเตอร์</span>
+    </esp-web-install-button>
+    <p class="note" style="margin-top:12px"><b>อัปเดตบอร์ดเดิม:</b> ถ้าถามว่าจะลบข้อมูลในบอร์ด (Erase) ไหม ให้ตอบ <b>ไม่ลบ</b> ค่า Wi-Fi และรหัสจะยังอยู่<br>
+      <b>บอร์ดใหม่:</b> หลังติดตั้ง ใช้มือถือเชื่อม Wi-Fi <b>FireAlarm-Setup-xxxxxx</b> (รหัส <b>bwfire2026</b>)
+      แล้วกรอก Wi-Fi, หน้าที่ของบอร์ด และรหัส MQTT ของ sender หรือ receiver</p>
+  </section>
   <p class="muted" style="text-align:center">ระบบแจ้งเตือนเสริม · หน้านี้แสดงสถานะแบบเรียลไทม์จาก EMQX Cloud</p>
 </main>
 
@@ -108,6 +128,9 @@ const $ = id => document.getElementById(id);
 let client = null;
 const state = { sOnline:null, rOnline:null, alarm:null, sSeen:0, rSeen:0 };
 
+const RR = {poweron:"เสียบไฟ / เปิดเครื่อง", ext:"กดปุ่ม EN", sw:"รีสตาร์ตด้วยโปรแกรม", panic:"⚠️ โปรแกรมพัง (crash)", wdt:"⚠️ โปรแกรมค้าง (watchdog)", brownout:"⚠️ ไฟเลี้ยงตก", "mqtt-wd":"ต่อ EMQX ไม่ได้นาน 5 นาที", saved:"บันทึกค่าตั้งค่าใหม่", other:"อื่น ๆ"};
+function fmtRr(c){ return c==null ? "-" : (RR[c] || c); }
+function diag(j,p){ $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent=j.fw||"-"; }
 function fmtUp(s){ if(s==null) return "-"; const d=Math.floor(s/86400), h=Math.floor(s/3600)%24, m=Math.floor(s/60)%60; return `${d} วัน ${h} ชม. ${m} นาที`; }
 function fmtRssi(r){ if(r==null) return "-"; const q = r>-60?"ดีมาก":r>-70?"ดี":r>-80?"พอใช้":"อ่อน"; return `${r} dBm (${q})`; }
 function ago(t){ if(!t) return "-"; const s=Math.round((Date.now()-t)/1000); return s<60?`${s} วินาทีที่แล้ว`:`${Math.round(s/60)} นาทีที่แล้ว`; }
@@ -146,10 +169,10 @@ function onMessage(topic, payload){
     case "receiver/online": state.rOnline = msg==="1"; if(state.rOnline) state.rSeen=Date.now(); break;
     case "sender/alarm":    state.alarm = msg==="1"; break;
     case "sender/info":
-      if(j){ state.sSeen=Date.now(); $("sRssi").textContent=fmtRssi(j.rssi); $("sLevel").textContent=j.level+" ครั้ง/วินาที"; $("sUp").textContent=fmtUp(j.up); }
+      if(j){ state.sSeen=Date.now(); $("sRssi").textContent=fmtRssi(j.rssi); $("sLevel").textContent=j.level+" ครั้ง/วินาที"; $("sUp").textContent=fmtUp(j.up); diag(j,"s"); }
       break;
     case "receiver/info":
-      if(j){ state.rSeen=Date.now(); $("rRssi").textContent=fmtRssi(j.rssi); $("rLink").textContent=j.link?"เห็น":"ไม่เห็น"; $("rUp").textContent=fmtUp(j.up); }
+      if(j){ state.rSeen=Date.now(); $("rRssi").textContent=fmtRssi(j.rssi); $("rLink").textContent=j.link?"เห็น":"ไม่เห็น"; $("rUp").textContent=fmtUp(j.up); diag(j,"r"); }
       break;
     case "sender/event":
       if(j?.type==="alarm_on") log("🔔 ตรวจพบเสียงตู้ Fire Alarm");
