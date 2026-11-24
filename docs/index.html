@@ -146,7 +146,7 @@ const state = { sOnline:null, rOnline:null, alarm:null, sSeen:0, rSeen:0 };
 
 const RR = {poweron:"เสียบไฟ / เปิดเครื่อง", ext:"กดปุ่ม EN", sw:"รีสตาร์ตด้วยโปรแกรม", panic:"⚠️ โปรแกรมพัง (crash)", wdt:"⚠️ โปรแกรมค้าง (watchdog)", brownout:"⚠️ ไฟเลี้ยงตก", "mqtt-wd":"ต่อ EMQX ไม่ได้นาน 5 นาที", saved:"บันทึกค่าตั้งค่าใหม่", ota:"อัปเดตเฟิร์มแวร์", rollback:"⚠️ เวอร์ชันใหม่ใช้ไม่ได้ ย้อนกลับเวอร์ชันเดิม", other:"อื่น ๆ"};
 function fmtRr(c){ return c==null ? "-" : (RR[c] || c); }
-function diag(j,p){ $(p+"Ssid").textContent=j.ssid||"-"; $(p+"Heap").textContent = j.heap==null ? "-" : `${Math.round(j.heap/1024)} KB (ต่ำสุด ${Math.round(j.minheap/1024)} KB)`; $(p+"Crash").textContent = j.crash || "-"; $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent=j.fw||"-"; }
+function diag(j,p){ $(p+"Ssid").textContent=j.ssid||"-"; $(p+"Heap").textContent = j.heap==null ? "-" : `${Math.round(j.heap/1024)} KB (ต่ำสุด ${Math.round(j.minheap/1024)} KB)`; $(p+"Crash").textContent = j.crash || "-"; $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent = j.fw ? (j.build ? `${j.fw} · ${j.build}` : j.fw) : "-"; }
 function fmtUp(s){ if(s==null) return "-"; const d=Math.floor(s/86400), h=Math.floor(s/3600)%24, m=Math.floor(s/60)%60; return `${d} วัน ${h} ชม. ${m} นาที`; }
 function fmtRssi(r){ if(r==null) return "-"; const q = r>-60?"ดีมาก":r>-70?"ดี":r>-80?"พอใช้":"อ่อน"; return `${r} dBm (${q})`; }
 function ago(t){ if(!t) return "-"; const s=Math.round((Date.now()-t)/1000); return s<60?`${s} วินาทีที่แล้ว`:`${Math.round(s/60)} นาทีที่แล้ว`; }
