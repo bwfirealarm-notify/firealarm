@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>BW Fire Alarm — สถานะระบบ</title>
 <script src="https://unpkg.com/mqtt@5/dist/mqtt.min.js"></script>
-<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 <style>
   :root{--bg:#eef2f1;--card:#fff;--ink:#17302c;--muted:#5d6f6c;--ok:#1b7f55;--bad:#c0392b;--warn:#b7791f;--brand:#17463f}
   *{box-sizing:border-box}
@@ -98,24 +97,19 @@
       <h2>เหตุการณ์ (ตั้งแต่เปิดหน้านี้)</h2>
       <ul id="log"><li class="muted">ยังไม่มีเหตุการณ์</li></ul>
     </div>
+    <div class="card">
+      <h2>ผู้ดูแลระบบ: ตรวจอัปเดตเฟิร์มแวร์ตอนนี้</h2>
+      <p class="muted">ปกติบอร์ดจะตรวจเองทุก 1 ชั่วโมง ถ้าเพิ่งอัปโหลดเวอร์ชันใหม่ขึ้น GitHub แล้วอยากให้อัปเดตทันที ให้กดปุ่มนี้ (รอ GitHub อัปเดตไฟล์ประมาณ 5 นาทีก่อน)</p>
+      <label for="adminPw">รหัสผ่านของผู้ใช้ <b>admin</b></label>
+      <input id="adminPw" type="password" autocomplete="off">
+      <div class="row"><button id="updateBtn">⬆️ สั่งตรวจอัปเดตทั้งสองบอร์ด</button></div>
+      <p class="muted" id="adminMsg"></p>
+    </div>
     <div class="row" style="margin-bottom:14px">
       <button id="logoutBtn" style="background:#7b8a88">ออกจากระบบ</button>
     </div>
   </section>
 
-  <!-- ติดตั้ง / อัปเดตเฟิร์มแวร์ -->
-  <section class="card">
-    <h2>ติดตั้ง / อัปเดตโปรแกรมลงบอร์ด</h2>
-    <p class="muted">ใช้ Chrome หรือ Edge บนคอมพิวเตอร์ เสียบบอร์ด ESP32 ด้วยสาย USB แล้วกดปุ่มด้านล่าง
-      โปรแกรมตัวเดียวใช้ได้ทั้งตัวส่งและตัวรับ</p>
-    <esp-web-install-button manifest="firmware/manifest.json">
-      <button slot="activate">⚡ ติดตั้ง / อัปเดตโปรแกรม</button>
-      <span slot="unsupported" class="note">เบราว์เซอร์นี้ไม่รองรับ กรุณาใช้ Chrome หรือ Edge บนคอมพิวเตอร์</span>
-    </esp-web-install-button>
-    <p class="note" style="margin-top:12px"><b>อัปเดตบอร์ดเดิม:</b> ถ้าถามว่าจะลบข้อมูลในบอร์ด (Erase) ไหม ให้ตอบ <b>ไม่ลบ</b> ค่า Wi-Fi และรหัสจะยังอยู่<br>
-      <b>บอร์ดใหม่:</b> หลังติดตั้ง ใช้มือถือเชื่อม Wi-Fi <b>FireAlarm-Setup-xxxxxx</b> 
-      แล้วกรอก Wi-Fi, หน้าที่ของบอร์ด และรหัส MQTT ของ sender หรือ receiver</p>
-  </section>
   <p class="muted" style="text-align:center">ระบบแจ้งเตือนเสริม · หน้านี้แสดงสถานะแบบเรียลไทม์จาก EMQX Cloud</p>
 </main>
 
@@ -144,6 +138,13 @@ function log(text){
   li.append(t, document.createTextNode(text));
   ul.prepend(li);
   while(ul.children.length>50) ul.lastChild.remove();
+}
+
+function otaLog(who, j){
+  if(!j) return;
+  if(j.type==="ota_start") log(`⬇️ ${who} กำลังอัปเดตเป็นเวอร์ชัน ${j.ver}`);
+  else if(j.type==="ota_ok") log(`✅ ${who} อัปเดตเป็นเวอร์ชัน ${j.ver} สำเร็จ`);
+  else if(j.type==="ota_failed") log(`❌ ${who} อัปเดตเวอร์ชัน ${j.ver} ไม่สำเร็จ`);
 }
 
 function render(){
@@ -178,9 +179,11 @@ function onMessage(topic, payload){
       if(j?.type==="alarm_on") log("🔔 ตรวจพบเสียงตู้ Fire Alarm");
       else if(j?.type==="alarm_off") log("✅ เสียงตู้หยุดแล้ว");
       else if(j?.type==="test") log("🧪 กดปุ่มทดสอบที่ตัวส่ง");
+      else otaLog("ตัวส่ง", j);
       break;
     case "receiver/event":
       if(j?.type==="silenced") log("🔕 พนักงานกดปิดเสียงที่เคาน์เตอร์");
+      else otaLog("ตัวรับ", j);
       break;
   }
   render();
@@ -214,6 +217,18 @@ $("connectBtn").onclick = () => {
   connect(pw);
 };
 $("pw").addEventListener("keydown", e => { if(e.key==="Enter") $("connectBtn").click(); });
+$("updateBtn").onclick = () => {
+  const pw = $("adminPw").value; if(!pw) return;
+  $("adminMsg").textContent = "กำลังส่งคำสั่ง…";
+  const a = mqtt.connect(BROKER_URL, { username:"admin", password:pw,
+    clientId:"admin-"+Math.random().toString(16).slice(2,10), reconnectPeriod:0, connectTimeout:10000 });
+  a.on("connect", () => a.publish(PREFIX + "/cmd/update", "check", {qos:1}, err => {
+    $("adminMsg").textContent = err ? "ส่งคำสั่งไม่สำเร็จ: " + err.message
+      : "ส่งคำสั่งแล้ว ✅ บอร์ดจะตรวจและอัปเดตเอง ดูผลในหัวข้อเหตุการณ์ด้านบน";
+    a.end(); $("adminPw").value = "";
+  }));
+  a.on("error", e => { $("adminMsg").textContent = "เชื่อมต่อไม่ได้: " + (e.message||e); a.end(true); });
+};
 $("logoutBtn").onclick = () => { localStorage.removeItem("bwfa_pw"); if(client) client.end(true); location.reload(); };
 
 try { const saved = localStorage.getItem("bwfa_pw"); if(saved) connect(saved); } catch(e){}
