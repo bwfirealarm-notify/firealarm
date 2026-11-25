@@ -42,6 +42,10 @@
   .live .thr{position:absolute;left:6px;right:6px;border-top:1px dashed var(--warn)}
   .live .thrl{position:absolute;right:8px;font-size:11px;color:var(--warn)}
   .bignum{font-size:28px;font-weight:700}
+  .pwwrap{position:relative}
+  .pwwrap input{padding-right:46px}
+  .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:0;padding:6px 8px;cursor:pointer;color:var(--muted);font-size:18px;line-height:1}
+  .eye:focus-visible{outline:2px solid var(--brand);border-radius:6px}
   .note{background:#fff7e6;border-radius:10px;padding:10px 12px;font-size:13px;color:#7a5a12}
 </style>
 </head>
@@ -56,7 +60,7 @@
   <section class="card" id="loginCard">
     <h2>เชื่อมต่อเพื่อดูสถานะ</h2>
     <label for="pw">รหัสผ่านของผู้ใช้ <b>dashboard</b></label>
-    <input id="pw" type="password" autocomplete="current-password">
+    <div class="pwwrap"><input id="pw" type="password" autocomplete="current-password"><button type="button" class="eye" data-for="pw" aria-label="แสดงรหัสผ่าน" title="แสดงรหัสผ่าน">👁</button></div>
     <div class="row">
       <label style="display:flex;gap:6px;align-items:center;margin:0"><input id="remember" type="checkbox" style="width:auto"> จำรหัสในเครื่องนี้</label>
       <button id="connectBtn">เชื่อมต่อ</button>
@@ -123,7 +127,7 @@
       <h2>ผู้ดูแลระบบ: ตรวจอัปเดตเฟิร์มแวร์ตอนนี้</h2>
       <p class="muted">ปกติบอร์ดจะตรวจเองทุก 1 ชั่วโมง ถ้าเพิ่งอัปโหลดเวอร์ชันใหม่ขึ้น GitHub แล้วอยากให้อัปเดตทันที ให้กดปุ่มนี้ (รอ GitHub อัปเดตไฟล์ประมาณ 5 นาทีก่อน)</p>
       <label for="adminPw">รหัสผ่านของผู้ใช้ <b>admin</b></label>
-      <input id="adminPw" type="password" autocomplete="off">
+      <div class="pwwrap"><input id="adminPw" type="password" autocomplete="off"><button type="button" class="eye" data-for="adminPw" aria-label="แสดงรหัสผ่าน" title="แสดงรหัสผ่าน">👁</button></div>
       <div class="row"><button id="updateBtn">⬆️ สั่งตรวจอัปเดตทั้งสองบอร์ด</button></div>
       <p class="muted" id="adminMsg"></p>
     </div>
@@ -273,12 +277,14 @@ function connect(pw){
 
 $("connectBtn").onclick = () => {
   const pw=$("pw").value; if(!pw) return;
+  hidePw("pw");
   if($("remember").checked) localStorage.setItem("bwfa_pw", pw);
   connect(pw);
 };
 $("pw").addEventListener("keydown", e => { if(e.key==="Enter") $("connectBtn").click(); });
 $("updateBtn").onclick = () => {
   const pw = $("adminPw").value; if(!pw) return;
+  hidePw("adminPw");
   $("adminMsg").textContent = "กำลังส่งคำสั่ง…";
   const a = mqtt.connect(BROKER_URL, { username:"admin", password:pw,
     clientId:"admin-"+Math.random().toString(16).slice(2,10), reconnectPeriod:0, connectTimeout:10000 });
@@ -289,6 +295,17 @@ $("updateBtn").onclick = () => {
   }));
   a.on("error", e => { $("adminMsg").textContent = "เชื่อมต่อไม่ได้: " + (e.message||e); a.end(true); });
 };
+// ปุ่มรูปตา: กดเพื่อแสดง/ซ่อนรหัสผ่าน
+document.querySelectorAll(".eye").forEach(b => b.onclick = () => {
+  const inp = $(b.dataset.for), show = inp.type === "password";
+  inp.type = show ? "text" : "password";
+  b.textContent = show ? "🙈" : "👁";
+  b.setAttribute("aria-label", show ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน");
+  b.title = b.getAttribute("aria-label");
+  inp.focus();
+});
+// ซ่อนรหัสกลับเสมอหลังกดเชื่อมต่อ/ส่งคำสั่ง
+function hidePw(id){ const i=$(id); i.type="password"; const b=document.querySelector(`.eye[data-for="${id}"]`); if(b){ b.textContent="👁"; b.setAttribute("aria-label","แสดงรหัสผ่าน"); b.title="แสดงรหัสผ่าน"; } }
 $("logoutBtn").onclick = () => { localStorage.removeItem("bwfa_pw"); if(client) client.end(true); location.reload(); };
 
 try { const saved = localStorage.getItem("bwfa_pw"); if(saved) connect(saved); } catch(e){}
