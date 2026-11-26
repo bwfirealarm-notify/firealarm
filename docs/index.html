@@ -47,6 +47,7 @@
   .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:0;padding:6px 8px;cursor:pointer;color:var(--muted);font-size:18px;line-height:1}
   .eye:focus-visible{outline:2px solid var(--brand);border-radius:6px}
   .note{background:#fff7e6;border-radius:10px;padding:10px 12px;font-size:13px;color:#7a5a12}
+.cpb{padding:2px 8px;font-size:12px;margin-left:6px;cursor:pointer;width:auto}
 </style>
 </head>
 <body>
@@ -81,6 +82,7 @@
         <h2>ตัวส่ง (ชั้นใต้ดิน) <span id="sOnline" class="pill unk">?</span></h2>
         <table>
           <tr><td>Wi-Fi</td><td id="sSsid">-</td></tr>
+          <tr><td>MAC address</td><td><span id="sMac" style="font-family:ui-monospace,monospace">-</span> <button type="button" class="cpb" onclick="cpMac(this,'sMac')">📋 คัดลอก</button></td></tr>
           <tr><td>สัญญาณ Wi-Fi</td><td id="sRssi">-</td></tr>
           <tr><td>ระดับเสียงล่าสุด</td><td id="sLevel">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="sUp">-</td></tr>
@@ -96,6 +98,7 @@
         <h2>ตัวรับ (เคาน์เตอร์) <span id="rOnline" class="pill unk">?</span></h2>
         <table>
           <tr><td>Wi-Fi</td><td id="rSsid">-</td></tr>
+          <tr><td>MAC address</td><td><span id="rMac" style="font-family:ui-monospace,monospace">-</span> <button type="button" class="cpb" onclick="cpMac(this,'rMac')">📋 คัดลอก</button></td></tr>
           <tr><td>สัญญาณ Wi-Fi</td><td id="rRssi">-</td></tr>
           <tr><td>เห็นตัวส่ง</td><td id="rLink">-</td></tr>
           <tr><td>เปิดเครื่องมาแล้ว</td><td id="rUp">-</td></tr>
@@ -150,7 +153,8 @@ const state = { sOnline:null, rOnline:null, alarm:null, sSeen:0, rSeen:0 };
 
 const RR = {poweron:"เสียบไฟ / เปิดเครื่อง", ext:"กดปุ่ม EN", sw:"รีสตาร์ตด้วยโปรแกรม", panic:"⚠️ โปรแกรมพัง (crash)", wdt:"⚠️ โปรแกรมค้าง (watchdog)", brownout:"⚠️ ไฟเลี้ยงตก", "mqtt-wd":"ต่อ EMQX ไม่ได้นาน 5 นาที", saved:"บันทึกค่าตั้งค่าใหม่", ota:"อัปเดตเฟิร์มแวร์", rollback:"⚠️ เวอร์ชันใหม่ใช้ไม่ได้ ย้อนกลับเวอร์ชันเดิม", other:"อื่น ๆ"};
 function fmtRr(c){ return c==null ? "-" : (RR[c] || c); }
-function diag(j,p){ $(p+"Ssid").textContent=j.ssid||"-"; $(p+"Heap").textContent = j.heap==null ? "-" : `${Math.round(j.heap/1024)} KB (ต่ำสุด ${Math.round(j.minheap/1024)} KB)`; $(p+"Crash").textContent = j.crash || "-"; $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent = j.fw ? (j.build ? `${j.fw} · ${j.build}` : j.fw) : "-"; }
+function cpMac(b,id){ const t=$(id).textContent; if(!t||t==="-") return; const done=ok=>{ b.textContent=ok?"✓ คัดลอกแล้ว":"คัดลอกไม่ได้"; setTimeout(()=>b.textContent="📋 คัดลอก",2500); }; if(navigator.clipboard) navigator.clipboard.writeText(t).then(()=>done(true),()=>done(false)); else done(false); }
+function diag(j,p){ $(p+"Ssid").textContent=j.ssid||"-"; $(p+"Mac").textContent=j.mac||"-"; $(p+"Heap").textContent = j.heap==null ? "-" : `${Math.round(j.heap/1024)} KB (ต่ำสุด ${Math.round(j.minheap/1024)} KB)`; $(p+"Crash").textContent = j.crash || "-"; $(p+"Rr").textContent=fmtRr(j.rr); $(p+"Drops").textContent=(j.drops==null?"-":j.drops+" ครั้ง (ตั้งแต่เปิดเครื่อง)"); $(p+"Fw").textContent = j.fw ? (j.build ? `${j.fw} · ${j.build}` : j.fw) : "-"; }
 function fmtUp(s){ if(s==null) return "-"; const d=Math.floor(s/86400), h=Math.floor(s/3600)%24, m=Math.floor(s/60)%60; return `${d} วัน ${h} ชม. ${m} นาที`; }
 function fmtRssi(r){ if(r==null) return "-"; const q = r>-60?"ดีมาก":r>-70?"ดี":r>-80?"พอใช้":"อ่อน"; return `${r} dBm (${q})`; }
 function ago(t){ if(!t) return "-"; const s=Math.round((Date.now()-t)/1000); return s<60?`${s} วินาทีที่แล้ว`:`${Math.round(s/60)} นาทีที่แล้ว`; }
@@ -174,7 +178,7 @@ function otaLog(who, j){
 }
 
 // ---- ระดับเสียงสด ----
-const LIVE_N = 60, THRESH = 20, SUSTAIN = 10;
+const LIVE_N = 60, THRESH = 20, SUSTAIN = 5;
 const liveVals = [];
 let liveLast = 0, liveTimer = null;
 const scaleH = v => Math.log10(v + 1) / Math.log10(1001);   // 0..1000 แบบลอการิทึม
